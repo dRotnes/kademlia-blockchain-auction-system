@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package kademlia;
+
+message NodeInfo {
+  string id = 1;
+  string ip = 2;
+  uint32 port = 3;
+}
+
+message PingRequest {
+  NodeInfo sender = 1;
+}
+
+message PingResponse {
+  string message = 1;
+}
+
+message StoreRequest {
+  NodeInfo sender = 1;
+  string key = 2;
+  bytes value = 3;
+}
+
+message StoreResponse {
+  string message = 1;
+}
+
+message FindNodeRequest {
+  NodeInfo sender = 1;
+  string target_id = 2;
+}
+
+message FindNodeResponse {
+  repeated NodeInfo closest_nodes = 1;
+}
+
+message FindValueRequest {
+  NodeInfo sender = 1;
+  string key = 2;
+}
+
+message FoundValue {
+  bytes value = 1;
+}
+
+message ClosestNodes {
+  repeated NodeInfo nodes = 1;
+}
+
+message FindValueResponse {
+  oneof result {
+    FoundValue value = 1;
+    ClosestNodes nodes = 2;
+  }
+}
+
+message BootstrapRequest {
+  NodeInfo sender = 1;
+}
+
+message BootstrapResponse {
+  string hash = 1;
+  uint32 difficulty = 2;
+}
+
+message ChallengeResolutionRequest {
+  NodeInfo sender = 1;
+  uint64 nonce = 2;
+}
+
+message ChallengeResolutionResponse {
+  bool accepted = 1;
+}
+
+// The Kademlia RPC service
+service Kademlia {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc Store(StoreRequest) returns (StoreResponse);
+  rpc FindNode(FindNodeRequest) returns (FindNodeResponse);
+  rpc FindValue(FindValueRequest) returns (FindValueResponse);
+  rpc Bootstrap(BootstrapRequest) returns (BootstrapResponse);
+  rpc ChallengeResolution(ChallengeResolutionRequest) returns (ChallengeResolutionResponse);
+}
