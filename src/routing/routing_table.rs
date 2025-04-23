@@ -17,13 +17,13 @@ pub struct RoutingTable {
 
 impl RoutingTable { 
     pub fn new(node_info: NodeInfo, config: Config) -> RoutingTable {
-        let mut rt = RoutingTable {
+        
+        let rt = RoutingTable {
             id: node_info.id,
             config,
             table: Arc::new(RwLock::new(vec![KBucket::new(); 256]))
         };
 
-        let _ = rt.insert_contact(node_info);
         rt
     }
 
@@ -31,6 +31,7 @@ impl RoutingTable {
      *  Returns the index (0..255) of the highest differing bit.
      */
     pub fn get_bucket_index(&self, node_id: U256) -> usize {
+        
         let distance = calculate_distance(self.id.clone(), node_id);
         let lz = distance.leading_zeros() as usize;
     
@@ -45,6 +46,7 @@ impl RoutingTable {
      * Evict a node from the bucket.
      */
     pub fn evict_from_bucket(bucket: &mut KBucket, node_id: &U256) {
+        
         // check if node is in the bucket
         let mut idx = None::<usize>;
         for (i, node_info) in bucket.list.iter().enumerate() {
@@ -56,6 +58,7 @@ impl RoutingTable {
 
         // remove node if it exists in the list
         if let Some(idx) = idx {
+            
             info!("Evicting existing entry");
             // remove contact from list
             let mut split_list = bucket.list.split_off(idx);
@@ -68,6 +71,11 @@ impl RoutingTable {
      * Attempts to insert a new contact into the routing table,
      */
     pub fn insert_contact(&mut self, node_info: NodeInfo) -> Option<()> {
+        
+        if node_info.id == self.id {
+            return None;
+        }
+        
         info!("Inserting new contact: {}", &node_info.id);
         let idx = self.get_bucket_index(node_info.id);
         let mut table = self.table.write().unwrap();

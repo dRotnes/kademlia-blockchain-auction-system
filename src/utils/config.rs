@@ -51,6 +51,10 @@ impl Config {
             }
         };
 
+        // TO DO: CHANGE THIS TO ONLY ./keys/... WHEN FINISHED WITH LOCAL DEVELOPMENT.
+        let pb_key_file: &str = if port == 8000 {"./keys/1/public_key.pem"} else {"./keys/2/public_key.pem"}; 
+        let pv_key_file: &str = if port == 8000 {"./keys/1/private_key.pem"} else {"./keys/2/private_key.pem"}; 
+
         Config {
             port,
 
@@ -61,9 +65,9 @@ impl Config {
             k_value: Config::read_envvar::<usize>("K_VALUE", 2),
             
             // Private key
-            private_key: Config::read_key("private_key.pem"),
+            private_key: Config::read_key(pv_key_file),
             // Public key
-            public_key:  Config::read_key("public_key.pem"),
+            public_key:  Config::read_key(pb_key_file),
             
             // Extra settings
             peer_sync_ms: Config::read_envvar::<u64>("PEER_SYNC_MS", 10000),

@@ -8,6 +8,16 @@ message NodeInfo {
   uint32 port = 3;
 }
 
+// New shared AuthMessage wrapper
+message AuthenticatedMessage {
+  NodeInfo sender = 1;
+  bytes public_key = 2;     // raw bytes of public key (e.g., secp256k1, ed25519, etc.)
+  bytes signature = 3;      // signature of the serialized inner message
+  bytes payload = 4;        // serialized original message (e.g., PingRequest)
+}
+
+// All actual requests/responses remain as-is below:
+
 message PingRequest {
   NodeInfo sender = 1;
 }
@@ -75,10 +85,10 @@ message ChallengeResolutionResponse {
 
 // The Kademlia RPC service
 service Kademlia {
-  rpc Ping(PingRequest) returns (PingResponse);
-  rpc Store(StoreRequest) returns (StoreResponse);
-  rpc FindNode(FindNodeRequest) returns (FindNodeResponse);
-  rpc FindValue(FindValueRequest) returns (FindValueResponse);
-  rpc Bootstrap(BootstrapRequest) returns (BootstrapResponse);
-  rpc ChallengeResolution(ChallengeResolutionRequest) returns (ChallengeResolutionResponse);
+  rpc Ping(AuthenticatedMessage) returns (PingResponse);
+  rpc Store(AuthenticatedMessage) returns (StoreResponse);
+  rpc FindNode(AuthenticatedMessage) returns (FindNodeResponse);
+  rpc FindValue(AuthenticatedMessage) returns (FindValueResponse);
+  rpc Bootstrap(AuthenticatedMessage) returns (BootstrapResponse);
+  rpc ChallengeResolution(AuthenticatedMessage) returns (ChallengeResolutionResponse);
 }

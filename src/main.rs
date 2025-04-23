@@ -33,6 +33,7 @@ fn main() {
 
     // Setup node_id.
     let node_id = hash_data(&config.public_key);
+    info!("Node id generated: {}", &node_id);
     // Get local IP.
     // let my_local_ip= local_ip().unwrap().to_string();
     let my_local_ip= String::from("127.0.0.1");

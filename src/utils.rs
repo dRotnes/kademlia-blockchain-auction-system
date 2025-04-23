@@ -3,6 +3,7 @@ pub mod logger;
 pub mod execution;
 pub mod termination;
 pub mod context;
+pub mod crypto_own;
 
 use std::{fs::{self, File}, io::{BufWriter, Write}};
 

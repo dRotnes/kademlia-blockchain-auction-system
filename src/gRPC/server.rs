@@ -10,6 +10,7 @@ use crate::node::Node;
 use crate::utils::{
     context::Context,
     execution::Runnable,
+    crypto_own::verify_signature,
     generate_challenge,
     hash_data
 };
@@ -29,7 +30,8 @@ use super::kademlia::{
     BootstrapRequest,
     BootstrapResponse,
     ChallengeResolutionRequest,
-    ChallengeResolutionResponse
+    ChallengeResolutionResponse,
+    AuthenticatedMessage
 };
 
 
@@ -60,9 +62,11 @@ impl Runnable for SKademliaServer {
 impl Kademlia for SKademliaServer {
     async fn ping(
         &self,
-        request: Request<PingRequest>,
+        request: Request<AuthenticatedMessage>,
     ) -> Result<Response<PingResponse>, Status> {
-        let sender = request.into_inner().sender.unwrap_or_default();
+        let verified_payload: PingRequest = extract_and_verify(request.into_inner()).await?;
+        let sender = verified_payload.sender.unwrap_or_default();
+
         info!("Received ping from: {:?}", sender);
 
         let reply = PingResponse {
@@ -73,9 +77,10 @@ impl Kademlia for SKademliaServer {
 
     async fn bootstrap(
         &self,
-        request: Request<BootstrapRequest>
+        request: Request<AuthenticatedMessage>
     ) -> Result<Response<BootstrapResponse>, Status> {
-        let sender = request.into_inner().sender.unwrap_or_default();
+        let verified_payload: BootstrapRequest = extract_and_verify(request.into_inner()).await?;
+        let sender = verified_payload.sender.unwrap_or_default();
         info!("Received bootstrap request from: {:?}", sender);
         let difficulty = self.node.config.challenge_difficulty;
         let challenge_hash = generate_challenge(difficulty);
@@ -95,11 +100,11 @@ impl Kademlia for SKademliaServer {
 
     async fn challenge_resolution(
         &self,
-        request: Request<ChallengeResolutionRequest>
+        request: Request<AuthenticatedMessage>
     ) -> Result<Response<ChallengeResolutionResponse>, Status> {
-        let parsed_request = request.into_inner();
-        let sender = parsed_request.sender.unwrap_or_default();
-        let nonce = parsed_request.nonce;
+        let verified_payload: ChallengeResolutionRequest = extract_and_verify(request.into_inner()).await?;
+        let sender = verified_payload.sender.unwrap_or_default();
+        let nonce = verified_payload.nonce;
 
         info!("Received challenge resolution from: {:?}", sender);
 
@@ -140,55 +145,58 @@ impl Kademlia for SKademliaServer {
 
     async fn store(
         &self,
-        request: Request<StoreRequest>,
+        request: Request<AuthenticatedMessage>,
     ) -> Result<Response<StoreResponse>, Status> {
-        let req = request.into_inner();
+        let verified_payload: StoreRequest = extract_and_verify(request.into_inner()).await?;
+
         info!(
             "Store request from {}:{} | key: {}, value_len: {}",
-            req.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
-            req.sender.as_ref().map(|s| s.port).unwrap_or(0),
-            req.key,
-            req.value.len()
+            verified_payload.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
+            verified_payload.sender.as_ref().map(|s| s.port).unwrap_or(0),
+            verified_payload.key,
+            verified_payload.value.len()
         );
 
         let reply = StoreResponse {
-            message: format!("Stored key {}", req.key),
+            message: format!("Stored key {}", verified_payload.key),
         };
         Ok(Response::new(reply))
     }
 
     async fn find_node(
         &self,
-        request: Request<FindNodeRequest>,
+        request: Request<AuthenticatedMessage>,
     ) -> Result<Response<FindNodeResponse>, Status> {
-        let req = request.into_inner();
+        let verified_payload: FindNodeRequest = extract_and_verify(request.into_inner()).await?;
+
         info!(
             "FindNode from {}:{} | target_id: {}",
-            req.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
-            req.sender.as_ref().map(|s| s.port).unwrap_or(0),
-            req.target_id
+            verified_payload.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
+            verified_payload.sender.as_ref().map(|s| s.port).unwrap_or(0),
+            verified_payload.target_id
         );
 
         let reply = FindNodeResponse {
-            closest_nodes: vec![], // Replace with actual K-bucket lookups
+            closest_nodes: vec![],
         };
         Ok(Response::new(reply))
     }
 
     async fn find_value(
         &self,
-        request: Request<FindValueRequest>,
+        request: Request<AuthenticatedMessage>,
     ) -> Result<Response<FindValueResponse>, Status> {
-        let req = request.into_inner();
+        let verified_payload: FindValueRequest = extract_and_verify(request.into_inner()).await?;
+
         info!(
             "FindValue from {}:{} | key: {}",
-            req.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
-            req.sender.as_ref().map(|s| s.port).unwrap_or(0),
-            req.key
+            verified_payload.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
+            verified_payload.sender.as_ref().map(|s| s.port).unwrap_or(0),
+            verified_payload.key
         );
 
         // Dummy logic: if key == "found", return a value. Otherwise, return closest nodes
-        let result = if req.key == "found" {
+        let result = if verified_payload.key == "found" {
             Some(FindValueResponse {
                 result: Some(crate::gRPC::kademlia::find_value_response::Result::Value(FoundValue {
                     value: b"hello world".to_vec(),
@@ -197,13 +205,30 @@ impl Kademlia for SKademliaServer {
         } else {
             Some(FindValueResponse {
                 result: Some(crate::gRPC::kademlia::find_value_response::Result::Nodes(ClosestNodes {
-                    nodes: vec![], // Add real neighbors
+                    nodes: vec![],
                 })),
             })
         };
 
         Ok(Response::new(result.unwrap()))
     }
+}
+
+async fn extract_and_verify<T: prost::Message + Default>(
+    msg: AuthenticatedMessage,
+) -> Result<T, Status> {
+    info!("{:?}", &msg);
+    let is_valid = verify_signature(&msg.payload, &msg.signature, &msg.public_key)
+        .map_err(|e| Status::unauthenticated(format!("Signature check error: {:?}", e)))?;
+
+    if !is_valid {
+        return Err(Status::unauthenticated("Invalid signature"));
+    }
+
+    let payload = T::decode(&*msg.payload)
+        .map_err(|e| Status::invalid_argument(format!("Failed to decode message: {:?}", e)))?;
+
+    Ok(payload)
 }
 
 async fn start_server(skademlia: SKademliaServer, ip: String, port:u32) -> Result<()> {
