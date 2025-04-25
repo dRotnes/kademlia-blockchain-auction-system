@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package kademlia;
 
-message NodeInfo {
+message NodeInformation {
   string id = 1;
   string ip = 2;
   uint32 port = 3;
@@ -10,24 +10,21 @@ message NodeInfo {
 
 // New shared AuthMessage wrapper
 message AuthenticatedMessage {
-  NodeInfo sender = 1;
-  bytes public_key = 2;     // raw bytes of public key (e.g., secp256k1, ed25519, etc.)
-  bytes signature = 3;      // signature of the serialized inner message
-  bytes payload = 4;        // serialized original message (e.g., PingRequest)
+  NodeInformation sender = 1;
+  bytes public_key = 2;
+  bytes signature = 3;
+  bytes payload = 4; 
 }
 
 // All actual requests/responses remain as-is below:
 
-message PingRequest {
-  NodeInfo sender = 1;
-}
+message PingRequest {}
 
 message PingResponse {
   string message = 1;
 }
 
 message StoreRequest {
-  NodeInfo sender = 1;
   string key = 2;
   bytes value = 3;
 }
@@ -37,16 +34,14 @@ message StoreResponse {
 }
 
 message FindNodeRequest {
-  NodeInfo sender = 1;
   string target_id = 2;
 }
 
 message FindNodeResponse {
-  repeated NodeInfo closest_nodes = 1;
+  repeated NodeInformation closest_nodes = 1;
 }
 
 message FindValueRequest {
-  NodeInfo sender = 1;
   string key = 2;
 }
 
@@ -55,7 +50,7 @@ message FoundValue {
 }
 
 message ClosestNodes {
-  repeated NodeInfo nodes = 1;
+  repeated NodeInformation nodes = 1;
 }
 
 message FindValueResponse {
@@ -65,9 +60,7 @@ message FindValueResponse {
   }
 }
 
-message BootstrapRequest {
-  NodeInfo sender = 1;
-}
+message BootstrapRequest {}
 
 message BootstrapResponse {
   string hash = 1;
@@ -75,7 +68,6 @@ message BootstrapResponse {
 }
 
 message ChallengeResolutionRequest {
-  NodeInfo sender = 1;
   uint64 nonce = 2;
 }
 
@@ -85,10 +77,10 @@ message ChallengeResolutionResponse {
 
 // The Kademlia RPC service
 service Kademlia {
-  rpc Ping(AuthenticatedMessage) returns (PingResponse);
-  rpc Store(AuthenticatedMessage) returns (StoreResponse);
-  rpc FindNode(AuthenticatedMessage) returns (FindNodeResponse);
-  rpc FindValue(AuthenticatedMessage) returns (FindValueResponse);
-  rpc Bootstrap(AuthenticatedMessage) returns (BootstrapResponse);
-  rpc ChallengeResolution(AuthenticatedMessage) returns (ChallengeResolutionResponse);
+  rpc Ping(AuthenticatedMessage) returns (AuthenticatedMessage);
+  rpc Store(AuthenticatedMessage) returns (AuthenticatedMessage);
+  rpc FindNode(AuthenticatedMessage) returns (AuthenticatedMessage);
+  rpc FindValue(AuthenticatedMessage) returns (AuthenticatedMessage);
+  rpc Bootstrap(AuthenticatedMessage) returns (AuthenticatedMessage);
+  rpc ChallengeResolution(AuthenticatedMessage) returns (AuthenticatedMessage);
 }

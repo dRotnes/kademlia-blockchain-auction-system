@@ -21,7 +21,7 @@ impl RoutingTable {
         let rt = RoutingTable {
             id: node_info.id,
             config,
-            table: Arc::new(RwLock::new(vec![KBucket::new(); 256]))
+            table: Arc::new(RwLock::new(vec![KBucket::new(); 255]))
         };
 
         rt
@@ -35,11 +35,7 @@ impl RoutingTable {
         let distance = calculate_distance(self.id.clone(), node_id);
         let lz = distance.leading_zeros() as usize;
     
-        if lz == 256 {
-            0
-        } else {
-            255 - lz
-        }
+        lz - 1
     }
 
     /**
@@ -70,7 +66,7 @@ impl RoutingTable {
     /**
      * Attempts to insert a new contact into the routing table,
      */
-    pub fn insert_contact(&mut self, node_info: NodeInfo) -> Option<()> {
+    pub fn insert_contact(&self, node_info: NodeInfo) -> Option<()> {
         
         if node_info.id == self.id {
             return None;
@@ -92,6 +88,82 @@ impl RoutingTable {
         }
         // key is not in the list, try to insert
         bucket.list.push_back(node_info);
+        
         return Some(());
+    }
+
+    /**
+     * Finds a node id in the table or returns None.
+     */
+    pub fn find_node_id(&self, node_id: &U256) -> Option<NodeInfo> {
+        if node_id == &self.id {
+            return None;
+        }
+
+        let idx = self.get_bucket_index(*node_id);
+        let table = self.table.read().ok()?;
+
+        let bucket = &table[idx];
+        for node in &bucket.list {
+            if &node.id == node_id {
+                return Some(node.clone());
+            }
+        }
+
+        None
+    }
+
+    /**
+     * Returns up to `k_value` closest nodes to the given `target_id`.
+     */
+    pub fn get_k_closest_nodes(&self, target_id: &U256) -> Vec<NodeInfo> {
+        let table = self.table.read().unwrap();
+        let mut result: Vec<NodeInfo> = Vec::new();
+        let mut visited = vec![false; table.len()];
+
+        let target_idx = self.get_bucket_index(*target_id);
+        let mut bucket_indices = vec![target_idx];
+
+        // Add neighboring indices symmetrically
+        for i in 1..table.len() {
+            let lower = target_idx.checked_sub(i);
+            let upper = target_idx + i;
+
+            if let Some(l) = lower {
+                if l < table.len() && !visited[l] {
+                    bucket_indices.push(l);
+                    visited[l] = true;
+                }
+            }
+
+            if upper < table.len() && !visited[upper] {
+                bucket_indices.push(upper);
+                visited[upper] = true;
+            }
+
+            if bucket_indices.len() >= table.len() {
+                break;
+            }
+        }
+
+        // Collect all nodes from the selected buckets
+        for &idx in &bucket_indices {
+            let bucket = &table[idx];
+            for node in &bucket.list {
+                if node.id != self.id {
+                    result.push(node.clone());
+                }
+            }
+
+            if result.len() >= self.config.k_value {
+                break;
+            }
+        }
+
+        // Sort nodes by XOR distance to the target_id
+        result.sort_by_key(|node| calculate_distance(node.id, *target_id));
+        result.truncate(self.config.k_value);
+
+        result
     }
 }

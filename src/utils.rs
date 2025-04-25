@@ -5,13 +5,10 @@ pub mod termination;
 pub mod context;
 pub mod crypto_own;
 
-use std::{fs::{self, File}, io::{BufWriter, Write}};
-
 pub use config::Config;
 
+use crypto_own::hash_data;
 use ethereum_types::U256;
-use crypto::{digest::Digest, sha2::Sha256};
-use openssl::{pkey::PKey, rsa::Rsa};
 use rand::{thread_rng, Rng};
 
 /**
@@ -34,22 +31,9 @@ pub fn proof_of_work(input: &str, difficulty: u32) -> u64 {
 }
 
 /**
- * Hashes input data using SHA-256.
+ * Generates a challenge. (Random U256)
  */
-pub fn hash_data(input: &str) -> U256 {
-    let mut byte_hash = <[u8; 32]>::default();
-    let mut hasher = Sha256::new();
-
-    hasher.input_str(input);
-    hasher.result(&mut byte_hash);
-
-    U256::from(&byte_hash)
-}
-
-/**
- * Generates a challenge according to the difficulty.
- */
-pub fn generate_challenge(difficulty: u32) -> U256 {
+pub fn generate_challenge() -> U256 {
     let mut rng = thread_rng();
 
     // Generate a random 256-bit number
@@ -60,63 +44,15 @@ pub fn generate_challenge(difficulty: u32) -> U256 {
 }
 
 /**
- * Generates a private and public key pair if none existent.
- */
-pub fn create_rsa_key_pair() {
-    let rsa = Rsa::generate(2048).expect("Failed to generate RSA key");
-    let pkey = PKey::from_rsa(rsa).expect("Failed to create PKey");
-
-    // Save private key to file
-    let private_key_pem = pkey.private_key_to_pem_pkcs8().expect("Failed to get private key PEM");
-    let mut private_file = BufWriter::new(File::create("private_key.pem").expect("Failed to create private key file"));
-    private_file.write_all(&private_key_pem).expect("Failed to write private key");
-    
-    // Save public key to file
-    let pub_key_pem = pkey.public_key_to_pem().expect("Failed to get public key PEM");
-    let mut public_file = BufWriter::new(File::create("public_key.pem").expect("Failed to create public key file"));
-    public_file.write_all(&pub_key_pem).expect("Failed to write public key");
-}
-
-/**
- * Generates a public key from an existing private key and saves it.
- */
-pub fn generate_public_key_from_private(private_key_pem: &str) {
-    // Read private key
-    let rsa = Rsa::private_key_from_pem(private_key_pem.as_bytes()).expect("Failed to parse private key");
-    let pkey = PKey::from_rsa(rsa).expect("Failed to create PKey from private key");
-
-    // Generate and save public key
-    let pub_key_pem = pkey.public_key_to_pem().expect("Failed to get public key PEM");
-    let mut public_file = BufWriter::new(File::create("public_key.pem").expect("Failed to create public key file"));
-    public_file.write_all(&pub_key_pem).expect("Failed to write public key");
-}
-
-/**
- * Sets up the keys.
- */
-pub fn setup_keys(config: &mut Config) {
-    info!("Setting up keys...");
-    if config.private_key.is_empty() && config.public_key.is_empty() {
-        info!("No private key provided, generating private and public key");
-        create_rsa_key_pair();
-        config.private_key = fs::read_to_string("private_key.pem").expect("Failed to read private key file");
-        config.public_key = fs::read_to_string("public_key.pem").expect("Failed to read public key file");
-        info!("Generated private and public keys.");
-    } else if config.private_key.is_empty() {
-        panic!("Public key is provided but private key is missing! Aborting.");
-    } else if config.public_key.is_empty() {
-        info!("Private key provided but public key is missing. Generating public key.");
-        generate_public_key_from_private(&config.private_key);
-        config.public_key = fs::read_to_string("public_key.pem").expect("Failed to read public key file");
-        info!("Generated public key.");
-    }
-}
-
-/**
  * Calculates the XOR distance metric between two node ids.
  */
 pub fn calculate_distance(id1: U256, id2: U256) -> U256 {
     id1 ^id2
 }
 
-
+/**
+ * Formats a U256 as a hex string.
+ */
+pub fn format_as_hex_string(number: U256) -> String {
+    format!("{:x}", number)
+}

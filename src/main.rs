@@ -4,12 +4,12 @@ extern crate log;
 mod node;
 mod utils;
 mod routing;
-mod gRPC;
+mod g_rpc;
 
 // External libraries
 use local_ip_address::local_ip;
 use node::Node;
-use gRPC::{SKademliaServer, SKademliaClient};
+use g_rpc::{SKademliaServer, SKademliaClient};
 use utils::context::Context;
 
 use crate::utils::{
@@ -17,7 +17,7 @@ use crate::utils::{
     logger,
     execution,
     Config,
-    hash_data
+    crypto_own::{hash_data, setup_keys}
 };
 
 fn main() {
@@ -29,7 +29,7 @@ fn main() {
     // Read environment variables and setup config object.
     let mut config: Config = Config::read();
     // Setup the public and private keys.
-    utils::setup_keys(&mut config);
+    setup_keys(&mut config);
 
     // Setup node_id.
     let node_id = hash_data(&config.public_key);

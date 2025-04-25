@@ -52,8 +52,8 @@ impl Config {
         };
 
         // TO DO: CHANGE THIS TO ONLY ./keys/... WHEN FINISHED WITH LOCAL DEVELOPMENT.
-        let pb_key_file: &str = if port == 8000 {"./keys/1/public_key.pem"} else {"./keys/2/public_key.pem"}; 
-        let pv_key_file: &str = if port == 8000 {"./keys/1/private_key.pem"} else {"./keys/2/private_key.pem"}; 
+        let pb_key_file: &str = if port == 8000 {"./keys/1/public_key.pem"} else if port == 8001 {"./keys/2/public_key.pem"} else {"./keys/3/public_key.pem"}; 
+        let pv_key_file: &str = if port == 8000 {"./keys/1/private_key.pem"} else if port == 8001 {"./keys/2/private_key.pem"} else {"./keys/3/private_key.pem"};
 
         Config {
             port,
