@@ -42,6 +42,7 @@ pub struct SKademliaServer {
 }
 
 impl SKademliaServer {
+
     pub fn new(context: &Context) -> SKademliaServer {
         SKademliaServer {
             node: context.node.clone(),
@@ -51,6 +52,7 @@ impl SKademliaServer {
 }
 
 impl Runnable for SKademliaServer {
+    
     fn run(&self) -> Result<()> {
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(start_server(self.clone(), self.node.node_info.ip.clone(), self.node.config.port))?;
@@ -60,14 +62,17 @@ impl Runnable for SKademliaServer {
 
 #[tonic::async_trait]
 impl Kademlia for SKademliaServer {
+
     async fn ping(
         &self,
         request: Request<AuthenticatedMessage>,
     ) -> Result<Response<AuthenticatedMessage>, Status> {
         let (_, parsed_request) = extract_and_verify::<PingRequest>(request.into_inner()).await?;
-        let sender = parsed_request.sender.unwrap_or_default();
-
-        info!("Received ping from: {:?}", sender);
+        let sender_proto = parsed_request
+            .sender
+            .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
+        
+        info!("Received ping from: {:?}", sender_proto);
 
         let reply = PingResponse {
             message: String::from("Pong"),
@@ -83,16 +88,18 @@ impl Kademlia for SKademliaServer {
         request: Request<AuthenticatedMessage>
     ) -> Result<Response<AuthenticatedMessage>, Status> {
         let (_, parsed_request) = extract_and_verify::<BootstrapRequest>(request.into_inner()).await?;
-
-        let sender = parsed_request.sender.unwrap_or_default();
-        info!("Received bootstrap request from: {:?}", sender);
+        let sender_proto = parsed_request
+            .sender
+            .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
+        
+        info!("Received bootstrap request from: {:?}", sender_proto);
         let difficulty = self.node.config.challenge_difficulty;
         let challenge_hash = generate_challenge();
 
         // Save challenge for when we receive a response.
         let mut challenges_map_mut = self.challenges_map.write().await;
         let expiration = (Utc::now() + Duration::minutes(10)).timestamp_millis();
-        challenges_map_mut.insert(sender.id.clone(), (challenge_hash.clone(), difficulty, expiration));
+        challenges_map_mut.insert(sender_proto.id.clone(), (challenge_hash.clone(), difficulty, expiration));
 
         let reply = BootstrapResponse {
             hash: challenge_hash.to_string(),
@@ -109,15 +116,18 @@ impl Kademlia for SKademliaServer {
         request: Request<AuthenticatedMessage>
     ) -> Result<Response<AuthenticatedMessage>, Status> {
         let (payload, parsed_request) = extract_and_verify::<ChallengeResolutionRequest>(request.into_inner()).await?;
-        let sender = parsed_request.sender.unwrap_or_default();
+        let sender_proto = parsed_request
+            .sender
+            .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
+
         let nonce = payload.nonce;
 
-        info!("Received challenge resolution from: {:?}", sender);
+        info!("Received challenge resolution from: {:?}", sender_proto);
 
         // Lock the challenges_sent RwLock to safely access the challenges_sent HashMap.
         let challenge_opt = {
             let challenges_map = self.challenges_map.read().await;
-            challenges_map.get(&sender.id).cloned()
+            challenges_map.get(&sender_proto.id).cloned()
         };    
 
         // Retrieve the challenge information for the given sender id.
@@ -139,7 +149,7 @@ impl Kademlia for SKademliaServer {
 
             // Remove challenge from challenges sent map.
             let mut challenges_sent_mut: tokio::sync::RwLockWriteGuard<'_, HashMap<String, (U256, u32, i64)>> = self.challenges_map.write().await;
-            challenges_sent_mut.remove(&sender.id);
+            challenges_sent_mut.remove(&sender_proto.id);
         }
 
         let reply = ChallengeResolutionResponse { 
@@ -185,7 +195,7 @@ impl Kademlia for SKademliaServer {
             .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
 
         let sender = NodeInfo::try_from(&sender_proto)
-            .map_err(|e| Status::internal(format!("Failed to parse sender info: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to parse NodeInfo from sender_proto: {:?}, error: {}", sender_proto, e)))?;
 
         info!(
             "FindNode from {:?} | target_id: {}",
@@ -196,16 +206,16 @@ impl Kademlia for SKademliaServer {
         let node_id = U256::from_str_radix(&payload.target_id, 16)
             .map_err(|e| Status::internal(format!("Failed to parse target_id '{}': {}", payload.target_id, e)))?;
 
-            let nodes_vector = self.node.find_node_in_routing_table(&node_id)
-                .map(|node| vec![node])
-                .unwrap_or_else(|| {
-                    let closest_nodes = self.node.get_closest_nodes_to_key(&node_id);
-                    if closest_nodes.is_empty() {
-                        vec![NodeInformation::from(&self.node.node_info)]
-                    } else {
-                        closest_nodes
-                    }
-                });
+        let nodes_vector = self.node.find_node_in_routing_table(&node_id)
+            .map(|node| vec![node])
+            .unwrap_or_else(|| {
+                let closest_nodes = self.node.get_closest_nodes_to_key(&node_id);
+                if closest_nodes.is_empty() {
+                    vec![NodeInformation::from(&self.node.node_info)]
+                } else {
+                    closest_nodes
+                }
+            });
 
         let reply = FindNodeResponse {
             closest_nodes: nodes_vector

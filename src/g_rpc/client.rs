@@ -2,9 +2,9 @@ use ethereum_types::U256;
 use tonic::Request;
 use anyhow::{anyhow, Context, Result};
 
-use crate::g_rpc::kademlia::{BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest, ChallengeResolutionResponse, PingResponse};
+use crate::g_rpc::kademlia::{BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest, ChallengeResolutionResponse, FindNodeResponse, PingResponse};
 use crate::node::{Node, NodeInfo};
-use crate::utils::format_as_hex_string;
+use crate::utils::{calculate_distance, format_as_hex_string};
 use crate::utils::{
     context,
     execution::{Runnable, sleep_millis},
@@ -13,6 +13,7 @@ use crate::utils::{
 };
 use super::kademlia::kademlia_client::KademliaClient;
 use super::kademlia::{FindNodeRequest, PingRequest};
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Clone)]
 pub struct SKademliaClient {
@@ -80,7 +81,12 @@ impl SKademliaClient {
                     info!("Bootstrap challenge solved successfully.");
                     // Insert bootstrap node into routing table after succesfully solving challenge.
                     self.node.insert_node_to_routing_table(bootstrap_node_info);
-                    let find_node = self.find_node(self.node.config.bootstrap_peer_ip.clone(), self.node.config.bootstrap_peer_port, self.node.node_info.id.clone()).await?;
+                    // Make a find_node request of own id.
+                    self.iterative_find_node(self.node.node_info.id)
+                        .await
+                        .with_context(|| format!("Failed to find_node {}", self.node.node_info.id))?;
+
+                    // let find_node = self.find_node(self.node.config.bootstrap_peer_ip.clone(), self.node.config.bootstrap_peer_port, self.node.node_info.id.clone()).await?;
                     // Start node.
                     return self.start().await;
                 }
@@ -222,7 +228,7 @@ impl SKademliaClient {
             .with_context(|| "Failed to send find_node request")?
             .into_inner();
 
-        let (payload, _) = extract_and_verify::<crate::g_rpc::kademlia::FindNodeResponse>(response)
+        let (payload, _) = extract_and_verify::<FindNodeResponse>(response)
             .await
             .with_context(|| "Failed to verify find_node response")?;
 
@@ -235,6 +241,62 @@ impl SKademliaClient {
         info!("{:?}", closest_nodes);
 
         Ok(closest_nodes)
+    }
+
+    pub async fn iterative_find_node(&self, target_id: U256) -> Result<()> {
+        let mut queried = HashSet::new();
+        let mut shortlist = VecDeque::new();
+        let mut found_nodes = Vec::new();
+    
+        // 1. Seed initial shortlist with known nodes (e.g., from your routing table).
+        let known_nodes = self.node.routing_table.get_k_closest_nodes(&target_id);
+        for node in known_nodes {
+            shortlist.push_back(node);
+        }
+    
+        // 2. Main loop
+        while let Some(node) = shortlist.pop_front() {
+            // Already queried.
+            if queried.contains(&node.id) {
+                continue;
+            }
+    
+            // Mark as queried.
+            queried.insert(node.id.clone());
+    
+            info!("FIND_NODE for {}:{}", &node.ip, &node.port);
+            let result = self.find_node(node.ip.clone(), node.port, target_id).await;
+    
+            let new_nodes = match result {
+                Ok(nodes) => nodes,
+                Err(err) => {
+                    // Skip on error.
+                    warn!("Failed to query node {}:{}: {:?}", node.ip, node.port, err);
+                    continue; 
+                }
+            };
+    
+            for new_node in new_nodes {
+                if queried.contains(&new_node.id) {
+                    continue;
+                }
+            
+                if new_node.id == self.node.node_info.id {
+                    continue;
+                }
+            
+                shortlist.push_back(new_node.clone());
+
+                if !(found_nodes.iter().any(|n: &NodeInfo| n.id == node.id)) {
+                    found_nodes.push(new_node.clone());
+                    self.node.insert_node_to_routing_table(new_node);
+                }
+            }
+    
+            shortlist.make_contiguous().sort_by_key(|n| calculate_distance(n.id, target_id));
+        }
+    
+        Ok(())
     }
 }
 

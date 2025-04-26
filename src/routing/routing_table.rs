@@ -35,6 +35,7 @@ impl RoutingTable {
         let distance = calculate_distance(self.id.clone(), node_id);
         let lz = distance.leading_zeros() as usize;
     
+        if lz == 256 { return 0; }
         lz - 1
     }
 
@@ -74,6 +75,7 @@ impl RoutingTable {
         
         info!("Inserting new contact: {}", &node_info.id);
         let idx = self.get_bucket_index(node_info.id);
+
         let mut table = self.table.write().unwrap();
         let bucket = &mut table[idx];
 
