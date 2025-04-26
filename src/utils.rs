@@ -54,5 +54,5 @@ pub fn calculate_distance(id1: U256, id2: U256) -> U256 {
  * Formats a U256 as a hex string.
  */
 pub fn format_as_hex_string(number: U256) -> String {
-    format!("{:x}", number)
+    format!("{:064x}", number)
 }

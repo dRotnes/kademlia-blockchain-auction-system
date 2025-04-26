@@ -33,10 +33,10 @@ impl KBucket {
         self.list.len()
     }
 
-    /**
-     * Last refresh time
-     */
-    pub fn last_refresh_time(&self) -> i64 {
-        self.last_refresh_time
-    }
+    // /**
+    //  * Last refresh time
+    //  */
+    // pub fn last_refresh_time(&self) -> i64 {
+    //     self.last_refresh_time
+    // }
 }

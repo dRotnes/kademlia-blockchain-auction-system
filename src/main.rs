@@ -5,7 +5,11 @@ mod node;
 mod utils;
 mod routing;
 mod g_rpc;
+mod blockchain;
 
+use std::str::FromStr;
+
+use blockchain::address::Address;
 // External libraries
 use local_ip_address::local_ip;
 use node::Node;
@@ -13,6 +17,7 @@ use g_rpc::{SKademliaServer, SKademliaClient};
 use utils::context::Context;
 
 use crate::utils::{
+    format_as_hex_string,
     termination,
     logger,
     execution,
@@ -33,7 +38,8 @@ fn main() {
 
     // Setup node_id.
     let node_id = hash_data(&config.public_key);
-    info!("Node id generated: {}", &node_id);
+    let address = Address::from_str(&format_as_hex_string(node_id)).unwrap();
+
     // Get local IP.
     // let my_local_ip= local_ip().unwrap().to_string();
     let my_local_ip= String::from("127.0.0.1");
@@ -41,10 +47,9 @@ fn main() {
     // Setup context.
     let context = Context {
         // NOTE: The last one should get the original config, the others a clone.
-        node: Node::new(node_id, my_local_ip, config.port, config),
+        node: Node::new(address, my_local_ip, config.port, config),
     };
 
-    
     let server = SKademliaServer::new(&context);
     let client = SKademliaClient::new(&context);
     execution::run_in_parallel(vec![&server, &client])

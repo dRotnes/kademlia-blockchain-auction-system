@@ -2,6 +2,7 @@ use ethereum_types::U256;
 use tonic::Request;
 use anyhow::{anyhow, Context, Result};
 
+use crate::blockchain::address::Address;
 use crate::g_rpc::kademlia::{BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest, ChallengeResolutionResponse, FindNodeResponse, PingResponse};
 use crate::node::{Node, NodeInfo};
 use crate::utils::{calculate_distance, format_as_hex_string};
@@ -63,6 +64,7 @@ impl SKademliaClient {
                 Ok(result) => result,
                 Err(e) => {
                     error!("Bootstrap request failed: {:?}", e);
+                    sleep_millis(self.node.config.peer_sync_ms);
                     continue;
                 }
             };
@@ -82,7 +84,7 @@ impl SKademliaClient {
                     // Insert bootstrap node into routing table after succesfully solving challenge.
                     self.node.insert_node_to_routing_table(bootstrap_node_info);
                     // Make a find_node request of own id.
-                    self.iterative_find_node(self.node.node_info.id)
+                    self.iterative_find_node(self.node.node_info.id.clone())
                         .await
                         .with_context(|| format!("Failed to find_node {}", self.node.node_info.id))?;
 
@@ -202,7 +204,7 @@ impl SKademliaClient {
         Ok((payload.accepted, NodeInfo::try_from(&sender)?))
     }
 
-    async fn find_node(&self, node_ip: String, node_port: u32, target_id: U256) -> Result<Vec<NodeInfo>> {
+    async fn find_node(&self, node_ip: String, node_port: u32, target_id: Address) -> Result<Vec<NodeInfo>> {
         let target = generate_url(&node_ip, node_port);
 
         let mut client = KademliaClient::connect(target.clone())
@@ -210,7 +212,7 @@ impl SKademliaClient {
             .with_context(|| format!("Failed to connect to {} for find_node", target))?;
 
         let inner_request = FindNodeRequest {
-            target_id: format_as_hex_string(target_id),
+            target_id: target_id.to_string(),
         };
 
         let auth_msg = sign_and_wrap(
@@ -238,12 +240,10 @@ impl SKademliaClient {
             })
             .collect::<Result<Vec<NodeInfo>>>()?;
 
-        info!("{:?}", closest_nodes);
-
         Ok(closest_nodes)
     }
 
-    pub async fn iterative_find_node(&self, target_id: U256) -> Result<()> {
+    pub async fn iterative_find_node(&self, target_id: Address) -> Result<()> {
         let mut queried = HashSet::new();
         let mut shortlist = VecDeque::new();
         let mut found_nodes = Vec::new();
@@ -265,7 +265,7 @@ impl SKademliaClient {
             queried.insert(node.id.clone());
     
             info!("FIND_NODE for {}:{}", &node.ip, &node.port);
-            let result = self.find_node(node.ip.clone(), node.port, target_id).await;
+            let result = self.find_node(node.ip.clone(), node.port, target_id.clone()).await;
     
             let new_nodes = match result {
                 Ok(nodes) => nodes,
@@ -293,7 +293,7 @@ impl SKademliaClient {
                 }
             }
     
-            shortlist.make_contiguous().sort_by_key(|n| calculate_distance(n.id, target_id));
+            shortlist.make_contiguous().sort_by_key(|n| n.id.distance(&target_id));
         }
     
         Ok(())

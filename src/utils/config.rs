@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::env;
 use std::str::FromStr;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 
 // type StringVec = Vec<String>;
 
@@ -22,8 +24,8 @@ pub struct Config {
     pub k_value: usize,
 
     // Keys
-    pub private_key: String,
-    pub public_key: String,
+    pub private_key: Vec<u8>,
+    pub public_key:  Vec<u8>,
     
     // Extra settings
     pub peer_sync_ms: u64,
@@ -84,12 +86,26 @@ impl Config {
         }
     }
 
-    // Reads the private key
-    fn read_key(file_path: &str) -> String {
-        fs::read_to_string(file_path).unwrap_or_else(|_| {
-            warn!("Warning: Failed to read private key from {}", file_path);
-            String::default()
-        })
+    // Reads a PEM file and returns the raw DER bytes.
+    pub fn read_key(file_path: &str) -> Vec<u8> {
+        let pem_content = fs::read_to_string(file_path).unwrap_or_else(|_| {
+            warn!("Warning: Failed to read key from {}", file_path);
+            String::new()
+        });
+
+        // Strip PEM headers and footers
+        let base64_data = pem_content
+            .lines()
+            .filter(|line| !line.starts_with("-----"))
+            .collect::<String>();
+
+        match BASE64_STANDARD.decode(base64_data) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                warn!("Warning: Failed to decode base64 key: {:?}", e);
+                Vec::new()
+            }
+        }
     }
 
     // Parses a multiple value (Vec) from a environment variable, accepting a default value if missing

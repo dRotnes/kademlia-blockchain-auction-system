@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{Duration, Utc};
@@ -6,6 +7,7 @@ use ethereum_types::U256;
 use tonic::{transport::Server, Request, Response, Status};
 use anyhow::{anyhow, Result};
 use tokio::sync::RwLock;
+use crate::blockchain::address::Address;
 use crate::g_rpc::kademlia::NodeInformation;
 use crate::node::{Node, NodeInfo};
 use crate::utils::{
@@ -71,8 +73,11 @@ impl Kademlia for SKademliaServer {
         let sender_proto = parsed_request
             .sender
             .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
+
+        let sender = NodeInfo::try_from(&sender_proto)
+            .map_err(|e| Status::internal(format!("Failed to parse NodeInfo from sender_proto: {:?}, error: {}", sender_proto, e)))?;
         
-        info!("Received ping from: {:?}", sender_proto);
+        info!("Received ping from: {}", sender);
 
         let reply = PingResponse {
             message: String::from("Pong"),
@@ -88,11 +93,15 @@ impl Kademlia for SKademliaServer {
         request: Request<AuthenticatedMessage>
     ) -> Result<Response<AuthenticatedMessage>, Status> {
         let (_, parsed_request) = extract_and_verify::<BootstrapRequest>(request.into_inner()).await?;
+
         let sender_proto = parsed_request
             .sender
             .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
+
+        let sender = NodeInfo::try_from(&sender_proto)
+            .map_err(|e| Status::internal(format!("Failed to parse NodeInfo from sender_proto: {:?}, error: {}", sender_proto, e)))?;
         
-        info!("Received bootstrap request from: {:?}", sender_proto);
+        info!("Received bootstrap request from: {}", sender);
         let difficulty = self.node.config.challenge_difficulty;
         let challenge_hash = generate_challenge();
 
@@ -116,13 +125,17 @@ impl Kademlia for SKademliaServer {
         request: Request<AuthenticatedMessage>
     ) -> Result<Response<AuthenticatedMessage>, Status> {
         let (payload, parsed_request) = extract_and_verify::<ChallengeResolutionRequest>(request.into_inner()).await?;
+       
         let sender_proto = parsed_request
             .sender
             .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
 
+        let sender = NodeInfo::try_from(&sender_proto)
+            .map_err(|e| Status::internal(format!("Failed to parse NodeInfo from sender_proto: {:?}, error: {}", sender_proto, e)))?;
+
         let nonce = payload.nonce;
 
-        info!("Received challenge resolution from: {:?}", sender_proto);
+        info!("Received challenge resolution from: {}", sender);
 
         // Lock the challenges_sent RwLock to safely access the challenges_sent HashMap.
         let challenge_opt = {
@@ -198,12 +211,12 @@ impl Kademlia for SKademliaServer {
             .map_err(|e| Status::internal(format!("Failed to parse NodeInfo from sender_proto: {:?}, error: {}", sender_proto, e)))?;
 
         info!(
-            "FindNode from {:?} | target_id: {}",
+            "FindNode from {} | target_id: {}",
             &sender,
             payload.target_id
         );
 
-        let node_id = U256::from_str_radix(&payload.target_id, 16)
+        let node_id = Address::from_str(&payload.target_id)
             .map_err(|e| Status::internal(format!("Failed to parse target_id '{}': {}", payload.target_id, e)))?;
 
         let nodes_vector = self.node.find_node_in_routing_table(&node_id)

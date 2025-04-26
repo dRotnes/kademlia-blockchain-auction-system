@@ -1,6 +1,12 @@
 use anyhow::Result;
 use crossbeam_utils::thread;
 use std::time;
+use tokio::time::{sleep, Duration};
+
+pub async fn sleep_millis_async(millis: u64) {
+    let wait_duration = Duration::from_millis(millis);
+    sleep(wait_duration).await;
+}
 
 pub trait Runnable: Sync {
     fn run(&self) -> Result<()>;
