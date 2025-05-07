@@ -79,7 +79,10 @@ impl RoutingTable {
     
         let idx = self.get_bucket_index(&node_info.id)?;
     
-        let mut table = self.table.write().unwrap();
+        let Ok(mut table) = self.table.write() else {
+            return None;
+        };
+
         let bucket = &mut table[idx];
     
         // evict key from bucket if it exists
@@ -106,7 +109,7 @@ impl RoutingTable {
         }
     
         let idx = self.get_bucket_index(node_id)?;
-        let table: std::sync::RwLockReadGuard<'_, Vec<KBucket>> = self.table.read().ok()?;
+        let table = self.table.read().ok()?;
     
         let bucket = &table[idx];
         for node in &bucket.list {
@@ -121,11 +124,9 @@ impl RoutingTable {
     /**
      * Returns up to `k_value` closest nodes to the given `target_id`.
      */
-    pub fn get_k_closest_nodes(&self, target_id: &Address) -> Vec<NodeInfo> {
-        let table = self.table.read().unwrap();
-        let mut result: Vec<NodeInfo> = Vec::new();
+    pub fn get_k_closest_nodes(&self, target_id: &Address, result: &mut Vec<NodeInfo>) {
+    let table = self.table.read().unwrap();
         let mut visited = vec![false; table.len()];
-
         let maybe_target_idx = self.get_bucket_index(target_id);
 
         let mut bucket_indices = vec![];
@@ -177,7 +178,5 @@ impl RoutingTable {
         // Sort nodes by XOR distance to the target_id
         result.sort_by_key(|node| node.id.distance(&target_id));
         result.truncate(self.config.k_value);
-
-        result
     }
 }

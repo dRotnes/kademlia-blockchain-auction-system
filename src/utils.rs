@@ -56,3 +56,10 @@ pub fn calculate_distance(id1: U256, id2: U256) -> U256 {
 pub fn format_as_hex_string(number: U256) -> String {
     format!("{:064x}", number)
 }
+
+/**
+ * Generates an url based on node ip and port.
+ */
+pub fn generate_url(node_ip: &str, node_port: u32) -> String {
+    format!("http://{}:{}", node_ip, node_port)
+}

@@ -16,6 +16,18 @@ message AuthenticatedMessage {
   bytes payload = 4; 
 }
 
+message Bid {
+  string buyer = 1;
+  string auction = 2;
+}
+
+message Auction {
+  string key = 1;
+  string object = 2;
+  string seller = 3;
+  repeated Bid bids = 4;
+}
+
 // All actual requests/responses remain as-is below:
 
 message PingRequest {}
@@ -25,8 +37,7 @@ message PingResponse {
 }
 
 message StoreRequest {
-  string key = 2;
-  bytes value = 3;
+  Auction auction = 1;
 }
 
 message StoreResponse {
@@ -34,7 +45,7 @@ message StoreResponse {
 }
 
 message FindNodeRequest {
-  string target_id = 2;
+  string target_id = 1;
 }
 
 message FindNodeResponse {
@@ -42,7 +53,7 @@ message FindNodeResponse {
 }
 
 message FindValueRequest {
-  string key = 2;
+  string key = 1;
 }
 
 message FoundValue {
@@ -68,7 +79,7 @@ message BootstrapResponse {
 }
 
 message ChallengeResolutionRequest {
-  uint64 nonce = 2;
+  uint64 nonce = 1;
 }
 
 message ChallengeResolutionResponse {

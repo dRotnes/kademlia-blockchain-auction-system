@@ -5,18 +5,21 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use ethereum_types::U256;
 use tonic::{transport::Server, Request, Response, Status};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use tokio::sync::RwLock;
+use crate::auction::Auction;
 use crate::blockchain::address::Address;
 use crate::g_rpc::kademlia::NodeInformation;
 use crate::node::{Node, NodeInfo};
 use crate::utils::{
-    context::Context,
+    generate_url,
+    context,
     execution::Runnable,
     crypto_own::{hash_data, sign_and_wrap, extract_and_verify},
     generate_challenge,
 };
 
+use super::kademlia::kademlia_client::KademliaClient;
 use super::kademlia::kademlia_server::{Kademlia, KademliaServer};
 use super::kademlia::{
     PingRequest,
@@ -45,7 +48,7 @@ pub struct SKademliaServer {
 
 impl SKademliaServer {
 
-    pub fn new(context: &Context) -> SKademliaServer {
+    pub fn new(context: &context::Context) -> SKademliaServer {
         SKademliaServer {
             node: context.node.clone(),
             challenges_map: Arc::new(RwLock::new(HashMap::new()))
@@ -173,28 +176,57 @@ impl Kademlia for SKademliaServer {
 
         Ok(Response::new(auth_msg))
     }
-
+    
     async fn store(
         &self,
         request: Request<AuthenticatedMessage>,
     ) -> Result<Response<AuthenticatedMessage>, Status> {
         let (payload, parsed_request) = extract_and_verify::<StoreRequest>(request.into_inner()).await?;
+        let sender_proto = parsed_request
+            .sender
+            .ok_or_else(|| Status::invalid_argument("Missing sender information in request"))?;
 
-        info!(
-            "Store request from {}:{} | key: {}, value_len: {}",
-            parsed_request.sender.as_ref().map(|s| &s.ip).unwrap_or(&"?".into()),
-            parsed_request.sender.as_ref().map(|s| s.port).unwrap_or(0),
-            payload.key,
-            payload.value.len()
-        );
+        let sender = NodeInfo::try_from(&sender_proto)
+            .map_err(|e| Status::internal(format!("Failed to parse NodeInfo from sender_proto: {:?}, error: {}", sender_proto, e)))?;
 
+        if (payload.auction.is_none()){
+            return Err(Status::invalid_argument("Missing auction information in request"));
+        }
+
+        info!("Received STORE from {}", sender);
+    
+        let auction: Auction = Auction::try_from(&payload.auction.unwrap())
+            .map_err(|e| Status::internal(format!("Failed to deserialize Auction: {}", e)))?;
+
+        let k_closest = self.node.get_closest_nodes_to_key(&auction.key);
+
+        let mut message = format!("Forwarded auction with key: {}", auction.key);
+
+        // If this node is among the closest, store it
+        if k_closest.iter().any(|n| n.id == self.node.node_info.id.to_string()) {
+            let _ = self.node.store_auction(auction.clone());
+            message = format!("Stored auction with key {}", auction.key);
+        }
+
+        // Forward store to other nodes
+        for node_info in k_closest {
+            if node_info.id != self.node.node_info.id.to_string() && node_info.id != sender.id.to_string() {
+                let _ = self.send_store_to_node(node_info.ip.clone(), node_info.port, &auction).await;
+            }
+        }
+        
         let reply = StoreResponse {
-            message: format!("Stored key {}", payload.key),
+            message,
         };
-
-        let auth_msg = sign_and_wrap(self.node.node_info.clone(), &reply, self.node.config.private_key.clone(), self.node.config.public_key.clone()).map_err(|e| Status::internal(format!("sign_and_wrap failed: {}", e)))?;
-
-        Ok(Response::new(auth_msg))
+    
+        let response = sign_and_wrap(
+            self.node.node_info.clone(),
+            &reply,
+            self.node.config.private_key.clone(),
+            self.node.config.public_key.clone(),
+        ).map_err(|e| Status::internal(format!("sign_and_wrap failed: {}", e)))?;
+    
+        Ok(Response::new(response))
     }
 
     async fn find_node(
@@ -275,6 +307,43 @@ impl Kademlia for SKademliaServer {
         let auth_msg = sign_and_wrap(self.node.node_info.clone(), &reply, self.node.config.private_key.clone(), self.node.config.public_key.clone()).map_err(|e| Status::internal(format!("sign_and_wrap failed: {}", e)))?;
 
         Ok(Response::new(auth_msg))
+    }
+}
+
+impl SKademliaServer {
+    async fn send_store_to_node(&self, node_ip: String, node_port: u32, auction: &Auction) -> Result<()> {
+        let target = generate_url(&node_ip, node_port);
+        let mut client = KademliaClient::connect(target.clone())
+            .await
+            .with_context(|| format!("Failed to connect to {} for ping", target))?;
+        
+        let store_request = StoreRequest {
+            auction: Some(auction.clone().into()),
+        };
+    
+        let auth_msg = sign_and_wrap(
+            self.node.node_info.clone(),
+            &store_request,
+            self.node.config.private_key.clone(),
+            self.node.config.public_key.clone(),
+        )?;
+    
+        let request = Request::new(auth_msg);
+    
+        let response = client
+            .store(request)
+            .await
+            .with_context(|| "Failed to send store request")?
+            .into_inner();
+    
+        let (payload, _) = extract_and_verify::<StoreResponse>(response)
+            .await
+            .with_context(|| "Failed to verify store response")?;
+    
+        info!("Store response: {}", payload.message);
+
+        drop(client);
+        Ok(())
     }
 }
 

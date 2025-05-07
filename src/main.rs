@@ -6,6 +6,7 @@ mod utils;
 mod routing;
 mod g_rpc;
 mod blockchain;
+mod auction;
 
 use std::str::FromStr;
 

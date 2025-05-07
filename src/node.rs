@@ -1,9 +1,10 @@
-use std::{fmt, str::FromStr};
+use std::{collections::{HashMap, HashSet}, fmt, str::FromStr, sync::{Arc, RwLock}};
 
 use anyhow::{anyhow, Result};
 use ethereum_types::U256;
-use crate::{blockchain::address::Address, g_rpc::kademlia::NodeInformation, routing::routing_table::RoutingTable, utils::Config};
+use crate::{auction::Auction, blockchain::address::Address, g_rpc::kademlia::NodeInformation, routing::routing_table::RoutingTable, utils::Config};
 
+type SyncedAuctions = Arc<RwLock<HashSet<Auction>>>;
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
     pub id: Address,
@@ -41,6 +42,7 @@ pub struct Node {
     pub node_info: NodeInfo,
     pub routing_table: RoutingTable,
     pub config: Config,
+    pub auctions: SyncedAuctions,
 }
 
 impl Node {
@@ -52,6 +54,7 @@ impl Node {
             node_info,
             routing_table,
             config,
+            auctions: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -66,12 +69,30 @@ impl Node {
     }
     
     pub fn get_closest_nodes_to_key(&self, node_id: &Address) -> Vec<NodeInformation> {
-        self.routing_table
-            .get_k_closest_nodes(node_id)
-            .into_iter()
+        let mut closest_nodes: Vec<NodeInfo> = vec![self.node_info.clone()];
+        self.routing_table.get_k_closest_nodes(node_id, &mut closest_nodes);
+            
+        closest_nodes.into_iter()
             .map(|node| NodeInformation::from(&node))
             .collect()
     }
+
+    pub fn store_auction(&self, auction: Auction) -> Result<()> {
+        let mut auctions_map = self.auctions.write()
+            .map_err(|_| anyhow!("Failed to acquire write lock on auctions"))?;
+        
+        if auctions_map.contains(&auction) {
+            return Ok(());
+        }    
+        
+        info!("Stored auction with key: {}", auction.key);
+        auctions_map.insert(auction);
+
+        info!("{:?}",auctions_map);
+        
+        Ok(())
+    }
+
 }
 
 impl From<&NodeInfo> for NodeInformation {

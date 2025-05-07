@@ -1,19 +1,18 @@
-use ethereum_types::U256;
 use tonic::Request;
 use anyhow::{anyhow, Context, Result};
 
 use crate::blockchain::address::Address;
 use crate::g_rpc::kademlia::{BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest, ChallengeResolutionResponse, FindNodeResponse, PingResponse};
 use crate::node::{Node, NodeInfo};
-use crate::utils::{calculate_distance, format_as_hex_string};
 use crate::utils::{
     context,
     execution::{Runnable, sleep_millis},
     proof_of_work,
+    generate_url,
     crypto_own::{sign_and_wrap, extract_and_verify},
 };
 use super::kademlia::kademlia_client::KademliaClient;
-use super::kademlia::{FindNodeRequest, PingRequest};
+use super::kademlia::{Auction, FindNodeRequest, PingRequest, StoreRequest};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Clone)]
@@ -24,7 +23,7 @@ pub struct SKademliaClient {
 impl SKademliaClient {
     pub fn new(context: &context::Context) -> SKademliaClient {
         SKademliaClient { 
-            node: context.node.clone()
+            node: context.node.clone(),
         }
     }
 }
@@ -48,6 +47,18 @@ impl SKademliaClient {
 
     async fn start(&self) -> Result<()> {
         info!("Node running");
+        let auction = Auction {
+            key: self.node.node_info.id.clone().to_string(),
+            object: "test".to_string(),
+            seller: self.node.node_info.id.clone().to_string(),
+            bids: vec![]
+        };
+        self.send_store_to_node(
+            self.node.config.bootstrap_peer_ip.clone(),
+            self.node.config.bootstrap_peer_port,
+            &auction
+        ).await?;
+        drop(auction);
         loop {
             sleep_millis(self.node.config.peer_sync_ms);
         }
@@ -136,6 +147,8 @@ impl SKademliaClient {
             .with_context(|| "Failed to verify ping response")?;
     
         info!("Ping response: {}", payload.message);
+
+        drop(client);
         Ok(())
     }
 
@@ -169,6 +182,8 @@ impl SKademliaClient {
             .with_context(|| "Failed to verify bootstrap response")?;
     
         info!("Challenge received from bootstrap node");
+
+        drop(client);
         Ok((payload.hash, payload.difficulty))
     }
 
@@ -201,6 +216,8 @@ impl SKademliaClient {
         let sender = parsed_response.sender.ok_or_else(|| anyhow!("Missing sender info in challenge response"))?;
 
         info!("Received challenge resolution response from bootstrap node");
+
+        drop(client);
         Ok((payload.accepted, NodeInfo::try_from(&sender)?))
     }
 
@@ -240,6 +257,7 @@ impl SKademliaClient {
             })
             .collect::<Result<Vec<NodeInfo>>>()?;
 
+        drop(client);
         Ok(closest_nodes)
     }
 
@@ -249,8 +267,9 @@ impl SKademliaClient {
         let mut found_nodes = Vec::new();
     
         // 1. Seed initial shortlist with known nodes (e.g., from your routing table).
-        let known_nodes = self.node.routing_table.get_k_closest_nodes(&target_id);
-        for node in known_nodes {
+        let mut closest_nodes: Vec<NodeInfo> = vec![];
+        self.node.routing_table.get_k_closest_nodes(&target_id, &mut closest_nodes);
+        for node in closest_nodes {
             shortlist.push_back(node);
         }
     
@@ -298,11 +317,39 @@ impl SKademliaClient {
     
         Ok(())
     }
-}
 
-/**
- * Generates an url based on node ip and port.
- */
-fn generate_url(node_ip: &str, node_port: u32) -> String {
-    format!("http://{}:{}", node_ip, node_port)
+    async fn send_store_to_node(&self, node_ip: String, node_port: u32, auction: &Auction) -> Result<()> {
+        let target = generate_url(&node_ip, node_port);
+        let mut client = KademliaClient::connect(target.clone())
+            .await
+            .with_context(|| format!("Failed to connect to {} for ping", target))?;
+        
+        let store_request = StoreRequest {
+            auction: Some(auction.clone().into()),
+        };
+    
+        let auth_msg = sign_and_wrap(
+            self.node.node_info.clone(),
+            &store_request,
+            self.node.config.private_key.clone(),
+            self.node.config.public_key.clone(),
+        )?;
+    
+        let request = Request::new(auth_msg);
+    
+        let response = client
+            .store(request)
+            .await
+            .with_context(|| "Failed to send store request")?
+            .into_inner();
+    
+        let (payload, _) = extract_and_verify::<PingResponse>(response)
+            .await
+            .with_context(|| "Failed to verify store response")?;
+    
+        info!("Store response: {}", payload.message);
+
+        drop(client);
+        Ok(())
+    }
 }
