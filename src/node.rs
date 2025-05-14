@@ -82,7 +82,7 @@ impl Node {
             .map_err(|_| anyhow!("Failed to acquire write lock on auctions"))?;
         
         if auctions_map.contains(&auction) {
-            return Ok((false));
+            return Ok(false);
         }    
         
         info!("Stored auction with key: {}", auction.key);
@@ -90,7 +90,7 @@ impl Node {
 
         info!("{:?}",auctions_map);
         
-        Ok((true))
+        Ok(true)
     }
 
 }
