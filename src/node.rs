@@ -77,7 +77,7 @@ impl Node {
             .collect()
     }
 
-    pub fn store_auction(&self, auction: Auction) -> Result<(bool)> {
+    pub fn store_auction(&self, auction: Auction) -> Result<bool> {
         let mut auctions_map = self.auctions.write()
             .map_err(|_| anyhow!("Failed to acquire write lock on auctions"))?;
         
