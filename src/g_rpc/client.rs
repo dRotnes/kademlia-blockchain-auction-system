@@ -1,6 +1,7 @@
 use tonic::Request;
 use anyhow::{anyhow, Context, Result};
 
+use crate::auction::Auction;
 use crate::blockchain::address::Address;
 use crate::g_rpc::kademlia::{BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest, ChallengeResolutionResponse, FindNodeResponse, PingResponse};
 use crate::node::{Node, NodeInfo};
@@ -12,7 +13,7 @@ use crate::utils::{
     crypto_own::{sign_and_wrap, extract_and_verify},
 };
 use super::kademlia::kademlia_client::KademliaClient;
-use super::kademlia::{Auction, FindNodeRequest, PingRequest, StoreRequest};
+use super::kademlia::{FindNodeRequest, PingRequest, StoreRequest};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Clone)]
@@ -47,18 +48,19 @@ impl SKademliaClient {
 
     async fn start(&self) -> Result<()> {
         info!("Node running");
-        let auction = Auction {
-            key: self.node.node_info.id.clone().to_string(),
-            object: "test".to_string(),
-            seller: self.node.node_info.id.clone().to_string(),
-            bids: vec![]
-        };
-        self.send_store_to_node(
-            self.node.config.bootstrap_peer_ip.clone(),
-            self.node.config.bootstrap_peer_port,
-            &auction
-        ).await?;
-        drop(auction);
+        if self.node.node_info.port != 8000 {
+            let auction = Auction::new(
+                "test".to_string(),
+                30,
+                &self.node.node_info.id,
+            );
+            self.send_store_to_node(
+                self.node.config.bootstrap_peer_ip.clone(),
+                self.node.config.bootstrap_peer_port,
+                &auction
+            ).await?;
+            drop(auction);
+        }
         loop {
             sleep_millis(self.node.config.peer_sync_ms);
         }

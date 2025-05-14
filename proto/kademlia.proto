@@ -24,8 +24,9 @@ message Bid {
 message Auction {
   string key = 1;
   string object = 2;
-  string seller = 3;
-  repeated Bid bids = 4;
+  uint64 initial_value = 3;
+  string seller = 4;
+  repeated Bid bids = 5;
 }
 
 // All actual requests/responses remain as-is below:

@@ -1,15 +1,37 @@
 use std::str::FromStr;
 use anyhow::{anyhow, Result};
 
-use crate::blockchain::address::Address;
+use crate::utils::format_as_hex_string;
+use crate::{blockchain::address::Address, utils::crypto_own::hash_data};
 use crate::g_rpc::kademlia;
 
 #[derive(Debug, Clone)]
 pub struct Auction {
     pub key: Address,
     pub object: String,
+    pub initial_value: u64,
     pub seller: Address,
     pub bids: Vec<Bid>,
+}
+impl Auction {
+    pub fn new(object: String, initial_value: u64, seller: &Address) -> Auction {
+        let mut auction = Auction {
+            key: Address::default(),
+            object,
+            initial_value,
+            seller: seller.clone(),
+            bids: Vec::new(),
+        };
+
+        auction.key = auction.generate_key();
+
+        auction
+    }
+
+    fn generate_key(&self) -> Address {
+        let data_to_hash = format!("{}{}{}", self.object, self.initial_value, self.seller.to_string());
+        Address::from_str(&format_as_hex_string(hash_data(&data_to_hash))).unwrap()
+    }
 }
 impl TryFrom<&kademlia::Auction> for Auction {
     type Error = anyhow::Error;
@@ -36,6 +58,7 @@ impl TryFrom<&kademlia::Auction> for Auction {
         Ok(Auction {
             key,
             object: proto.object.clone(),
+            initial_value: proto.initial_value,
             seller,
             bids,
         })
@@ -47,6 +70,7 @@ impl From<Auction> for kademlia::Auction {
         kademlia::Auction {
             key: auction.key.to_string(),
             object: auction.object,
+            initial_value: auction.initial_value,
             seller: auction.seller.to_string(),
             bids: auction
                 .bids
@@ -65,6 +89,7 @@ impl From<&Auction> for kademlia::Auction {
         kademlia::Auction {
             key: auction.key.to_string().clone(),
             object: auction.object.clone(),
+            initial_value: auction.initial_value,
             seller: auction.seller.to_string(),
             bids: auction
                 .bids
