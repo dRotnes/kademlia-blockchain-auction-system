@@ -77,12 +77,12 @@ impl Node {
             .collect()
     }
 
-    pub fn store_auction(&self, auction: Auction) -> Result<()> {
+    pub fn store_auction(&self, auction: Auction) -> Result<(bool)> {
         let mut auctions_map = self.auctions.write()
             .map_err(|_| anyhow!("Failed to acquire write lock on auctions"))?;
         
         if auctions_map.contains(&auction) {
-            return Ok(());
+            return Ok((false));
         }    
         
         info!("Stored auction with key: {}", auction.key);
@@ -90,7 +90,7 @@ impl Node {
 
         info!("{:?}",auctions_map);
         
-        Ok(())
+        Ok((true))
     }
 
 }

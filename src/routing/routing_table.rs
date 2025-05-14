@@ -125,7 +125,7 @@ impl RoutingTable {
      * Returns up to `k_value` closest nodes to the given `target_id`.
      */
     pub fn get_k_closest_nodes(&self, target_id: &Address, result: &mut Vec<NodeInfo>) {
-    let table = self.table.read().unwrap();
+        let table = self.table.read().unwrap();
         let mut visited = vec![false; table.len()];
         let maybe_target_idx = self.get_bucket_index(target_id);
 

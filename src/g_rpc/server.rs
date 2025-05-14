@@ -202,16 +202,22 @@ impl Kademlia for SKademliaServer {
 
         let mut message = format!("Forwarded auction with key: {}", auction.key);
 
-        // If this node is among the closest, store it
+        // If this node is among the closest, store it.
+        let mut should_forward = true;
         if k_closest.iter().any(|n| n.id == self.node.node_info.id.to_string()) {
-            let _ = self.node.store_auction(auction.clone());
+            should_forward =  match self.node.store_auction(auction.clone()) {
+                Ok(value) => value,
+                Err(_) => false,
+            };
             message = format!("Stored auction with key {}", auction.key);
         }
 
-        // Forward store to other nodes
-        for node_info in k_closest {
-            if node_info.id != self.node.node_info.id.to_string() && node_info.id != sender.id.to_string() {
-                let _ = self.send_store_to_node(node_info.ip.clone(), node_info.port, &auction).await;
+        // Forward store to other nodes.
+        if should_forward {
+            for node_info in k_closest {
+                if node_info.id != self.node.node_info.id.to_string() && node_info.id != sender.id.to_string() {
+                    let _ = self.send_store_to_node(node_info.ip.clone(), node_info.port, &auction).await;
+                }
             }
         }
         
