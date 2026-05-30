@@ -3,14 +3,19 @@ extern crate log;
 
 mod auction;
 mod blockchain;
+mod command;
+mod consensus;
 mod g_rpc;
 mod node;
 mod routing;
+mod storage;
 mod utils;
 
+use std::env;
 use std::str::FromStr;
 
 use blockchain::address::Address;
+use command::Command;
 use g_rpc::{SKademliaClient, SKademliaServer};
 use node::Node;
 use utils::context::Context;
@@ -28,6 +33,11 @@ fn main() {
 
     // Read environment variables and setup config object.
     let mut config: Config = Config::read();
+    let command = Command::parse(&env::args().collect::<Vec<_>>()).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        std::process::exit(2);
+    });
+
     // Setup the public and private keys.
     setup_keys(&mut config);
 
@@ -46,6 +56,15 @@ fn main() {
     };
 
     let server = SKademliaServer::new(&context);
-    let client = SKademliaClient::new(&context);
-    execution::run_in_parallel(vec![&server, &client])
+    let client = SKademliaClient::new(&context, command.clone());
+
+    if command.is_serve() {
+        execution::run_in_parallel(vec![&server, &client])
+    } else {
+        let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+        if let Err(error) = runtime.block_on(client.run_command()) {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
+    }
 }

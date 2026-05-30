@@ -64,11 +64,7 @@ mod tests {
         let recipient =
             Address::from_str("0000000000000000000000000000000000000000000000000000000000000002")
                 .unwrap();
-        let transaction = Transaction {
-            sender,
-            recipient,
-            amount: 10,
-        };
+        let transaction = Transaction::transfer(sender, recipient, 10);
 
         let first = Block::new(1, 1, U256::zero(), vec![transaction.clone()]);
         let second = Block::new(1, 2, U256::zero(), vec![transaction]);

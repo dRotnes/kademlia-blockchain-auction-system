@@ -19,6 +19,7 @@ message AuthenticatedMessage {
 message Bid {
   string buyer = 1;
   string auction = 2;
+  uint64 amount = 3;
 }
 
 message Auction {
@@ -27,6 +28,11 @@ message Auction {
   uint64 initial_value = 3;
   string seller = 4;
   repeated Bid bids = 5;
+  string status = 6;
+  int64 created_at = 7;
+  int64 ends_at = 8;
+  string winner = 9;
+  uint64 winning_bid = 10;
 }
 
 // All actual requests/responses remain as-is below:

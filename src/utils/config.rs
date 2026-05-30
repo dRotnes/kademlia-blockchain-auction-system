@@ -29,11 +29,17 @@ pub struct Config {
     pub public_key: Vec<u8>,
     pub private_key_path: String,
     pub public_key_path: String,
+    pub data_dir: String,
 
     // Extra settings
     pub peer_sync_ms: u64,
     pub challenge_difficulty: u32,
     pub n_max_retries: u8,
+    pub consensus_mode: String,
+    pub reputation_threshold: u64,
+    pub automation_enabled: bool,
+    pub automation_interval_ms: u64,
+    pub auction_duration_ms: i64,
 }
 
 impl Config {
@@ -63,6 +69,10 @@ impl Config {
             .join("private_key.pem")
             .to_string_lossy()
             .to_string();
+        let data_dir = PathBuf::from("./data")
+            .join(port.to_string())
+            .to_string_lossy()
+            .to_string();
 
         Config {
             port,
@@ -82,11 +92,17 @@ impl Config {
             public_key: Config::read_key(&public_key_path),
             private_key_path,
             public_key_path,
+            data_dir,
 
             // Extra settings
             peer_sync_ms: Config::read_envvar::<u64>("PEER_SYNC_MS", 10000),
             challenge_difficulty: Config::read_envvar::<u32>("CHALLENGE_DIFFICULTY", 5),
             n_max_retries: Config::read_envvar::<u8>("N_MAX_RETRIES", 3),
+            consensus_mode: Config::read_envvar::<String>("CONSENSUS_MODE", "pow".to_string()),
+            reputation_threshold: Config::read_envvar::<u64>("REPUTATION_THRESHOLD", 1),
+            automation_enabled: Config::read_envvar::<bool>("AUTOMATION_ENABLED", false),
+            automation_interval_ms: Config::read_envvar::<u64>("AUTOMATION_INTERVAL_MS", 5000),
+            auction_duration_ms: Config::read_envvar::<i64>("AUCTION_DURATION_MS", 30000),
         }
     }
 

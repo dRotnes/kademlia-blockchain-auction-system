@@ -1,13 +1,17 @@
 use anyhow::{anyhow, Context, Result};
+use chrono::Utc;
+use prost::Message;
+use rand::{seq::SliceRandom, Rng};
 use tonic::Request;
 
 use super::kademlia::kademlia_client::KademliaClient;
 use super::kademlia::{FindNodeRequest, PingRequest, StoreRequest};
-use crate::auction::Auction;
+use crate::auction::{Auction, AuctionStatus};
 use crate::blockchain::address::Address;
+use crate::command::Command;
 use crate::g_rpc::kademlia::{
-    BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest, ChallengeResolutionResponse,
-    FindNodeResponse, FindValueResponse, PingResponse, StoreResponse,
+    find_value_response, BootstrapRequest, BootstrapResponse, ChallengeResolutionRequest,
+    ChallengeResolutionResponse, FindNodeResponse, FindValueResponse, PingResponse, StoreResponse,
 };
 use crate::node::{Node, NodeInfo};
 use crate::utils::{
@@ -21,12 +25,14 @@ use std::collections::{HashSet, VecDeque};
 #[derive(Clone)]
 pub struct SKademliaClient {
     node: Node,
+    command: Command,
 }
 
 impl SKademliaClient {
-    pub fn new(context: &context::Context) -> SKademliaClient {
+    pub fn new(context: &context::Context, command: Command) -> SKademliaClient {
         SKademliaClient {
             node: context.node.clone(),
+            command,
         }
     }
 }
@@ -49,22 +55,74 @@ impl Runnable for SKademliaClient {
 impl SKademliaClient {
     async fn start(&self) -> Result<()> {
         info!("Node running");
-        if self.node.node_info.port != 8000 {
-            let auction = Auction::new("test".to_string(), 30, &self.node.node_info.id);
-            self.send_store_to_node(
-                self.node.config.bootstrap_peer_ip.clone(),
-                self.node.config.bootstrap_peer_port,
-                &auction,
-            )
-            .await?;
-            drop(auction);
-        }
+
         loop {
-            sleep_millis(self.node.config.peer_sync_ms);
+            if self.node.config.automation_enabled {
+                if let Err(error) = self.run_automation_tick().await {
+                    warn!("Automation tick failed: {error:#}");
+                }
+                sleep_millis(self.node.config.automation_interval_ms);
+            } else {
+                sleep_millis(self.node.config.peer_sync_ms);
+            }
         }
     }
 
     async fn try_bootstrap(&self) -> Result<()> {
+        self.join_network(true).await?;
+        self.start().await
+    }
+
+    /// Run a one-shot demo command. The bootstrap/peer daemon should already be
+    /// running elsewhere; this process joins the network, performs the command,
+    /// prints the result, and exits.
+    pub async fn run_command(&self) -> Result<()> {
+        self.join_network(false).await?;
+
+        match &self.command {
+            Command::Serve => self.start().await,
+            Command::CreateAuction {
+                object,
+                initial_value,
+            } => {
+                let auction = Auction::new(object.clone(), *initial_value, &self.node.node_info.id);
+                self.publish_auction(&auction).await?;
+                println!(
+                    "Created auction\nkey: {}\nobject: {}\ninitial_value: {}\nseller: {}",
+                    auction.key, auction.object, auction.initial_value, auction.seller
+                );
+                Ok(())
+            }
+            Command::FindAuction { key } => {
+                let auction = self
+                    .find_auction_in_network(key.clone())
+                    .await?
+                    .ok_or_else(|| anyhow!("Auction not found for key {}", key))?;
+                print_auction(&auction);
+                Ok(())
+            }
+            Command::Bid { key, amount } => {
+                let mut auction = self
+                    .find_auction_in_network(key.clone())
+                    .await?
+                    .ok_or_else(|| anyhow!("Auction not found for key {}", key))?;
+                auction.place_bid(self.node.node_info.id.clone(), *amount)?;
+                self.publish_auction(&auction).await?;
+                println!(
+                    "Placed bid\nauction: {}\namount: {}\nbuyer: {}",
+                    auction.key, amount, self.node.node_info.id
+                );
+                Ok(())
+            }
+        }
+    }
+
+    async fn join_network(&self, discover_peers: bool) -> Result<()> {
+        if self.node.node_info.port == self.node.config.bootstrap_peer_port {
+            info!("This is the bootstrap node, skipping bootstrap...");
+            return Ok(());
+        }
+
         for attempt in 0..self.node.config.n_max_retries {
             info!("Attempt {} to bootstrap...", attempt + 1);
 
@@ -99,16 +157,18 @@ impl SKademliaClient {
                     info!("Bootstrap challenge solved successfully.");
                     // Insert bootstrap node into routing table after succesfully solving challenge.
                     self.node.insert_node_to_routing_table(bootstrap_node_info);
-                    // Make a find_node request of own id.
-                    self.iterative_find_node(self.node.node_info.id.clone())
-                        .await
-                        .with_context(|| {
-                            format!("Failed to find_node {}", self.node.node_info.id)
-                        })?;
+                    if discover_peers {
+                        // Long-running peers discover neighbors. One-shot
+                        // command clients skip this so the routing table does
+                        // not fill with ports that exit immediately.
+                        self.iterative_find_node(self.node.node_info.id.clone())
+                            .await
+                            .with_context(|| {
+                                format!("Failed to find_node {}", self.node.node_info.id)
+                            })?;
+                    }
 
-                    // let find_node = self.find_node(self.node.config.bootstrap_peer_ip.clone(), self.node.config.bootstrap_peer_port, self.node.node_info.id.clone()).await?;
-                    // Start node.
-                    return self.start().await;
+                    return Ok(());
                 }
                 Ok((false, _)) => {
                     warn!("Challenge rejected. Retrying...");
@@ -122,6 +182,149 @@ impl SKademliaClient {
 
         error!("Exceeded max retries. Exiting.");
         std::process::exit(1);
+    }
+
+    async fn publish_auction(&self, auction: &Auction) -> Result<()> {
+        self.node.store_auction(auction.clone())?;
+
+        if self.node.node_info.port != self.node.config.bootstrap_peer_port {
+            self.send_store_to_node(
+                self.node.config.bootstrap_peer_ip.clone(),
+                self.node.config.bootstrap_peer_port,
+                auction,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn run_automation_tick(&self) -> Result<()> {
+        let closed = self
+            .node
+            .close_expired_auctions(Utc::now().timestamp_millis())?;
+        for auction in closed {
+            self.publish_auction(&auction).await?;
+            if let (Some(winner), Some(amount)) = (&auction.winner, auction.winning_bid) {
+                info!(
+                    "Closed auction {} won by {} for {}",
+                    auction.key, winner, amount
+                );
+            }
+        }
+
+        let action = rand::thread_rng().gen_range(0..3);
+        match action {
+            0 => self.create_random_auction().await?,
+            1 => self.bid_on_random_auction().await?,
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    async fn create_random_auction(&self) -> Result<()> {
+        let items = [
+            "Vintage keyboard",
+            "Mechanical watch",
+            "Signed poster",
+            "Film camera",
+            "Studio headphones",
+            "Arcade cabinet",
+            "Antique map",
+            "Handmade chess set",
+        ];
+        let mut rng = rand::thread_rng();
+        let object = items
+            .choose(&mut rng)
+            .ok_or_else(|| anyhow!("No automation items configured"))?
+            .to_string();
+        let initial_value = rng.gen_range(10..150);
+        let auction = Auction::new_with_duration(
+            object,
+            initial_value,
+            &self.node.node_info.id,
+            self.node.config.auction_duration_ms,
+        );
+
+        self.publish_auction(&auction).await?;
+        info!(
+            "Automation created auction {} with initial value {}",
+            auction.key, auction.initial_value
+        );
+        Ok(())
+    }
+
+    async fn bid_on_random_auction(&self) -> Result<()> {
+        let mut auctions = self
+            .node
+            .all_auctions()?
+            .into_iter()
+            .filter(|auction| {
+                auction.status == AuctionStatus::Open && auction.seller != self.node.node_info.id
+            })
+            .collect::<Vec<_>>();
+
+        if auctions.is_empty() {
+            return Ok(());
+        }
+
+        let mut rng = rand::thread_rng();
+        let auction = auctions
+            .choose_mut(&mut rng)
+            .ok_or_else(|| anyhow!("No auction available to bid on"))?;
+        let amount = auction.highest_bid_amount() + rng.gen_range(1..25);
+        auction.place_bid(self.node.node_info.id.clone(), amount)?;
+        self.publish_auction(auction).await?;
+        info!("Automation bid {} on auction {}", amount, auction.key);
+        Ok(())
+    }
+
+    async fn find_auction_in_network(&self, key: Address) -> Result<Option<Auction>> {
+        if let Some(auction) = self.node.find_auction(&key)? {
+            return Ok(Some(auction));
+        }
+
+        let mut nodes_to_query = VecDeque::new();
+        nodes_to_query.push_back(NodeInfo {
+            id: key.clone(),
+            ip: self.node.config.bootstrap_peer_ip.clone(),
+            port: self.node.config.bootstrap_peer_port,
+        });
+
+        let mut queried = HashSet::new();
+        while let Some(node) = nodes_to_query.pop_front() {
+            let query_key = format!("{}:{}", node.ip, node.port);
+            if !queried.insert(query_key) {
+                continue;
+            }
+
+            let response = self
+                .find_value(node.ip.clone(), node.port, key.clone())
+                .await
+                .with_context(|| {
+                    format!("Failed to query {}:{} for auction", node.ip, node.port)
+                })?;
+
+            match response.result {
+                Some(find_value_response::Result::Value(value)) => {
+                    let proto = crate::g_rpc::kademlia::Auction::decode(&*value.value)
+                        .with_context(|| "Failed to decode auction value")?;
+                    return Ok(Some(Auction::try_from(&proto)?));
+                }
+                Some(find_value_response::Result::Nodes(nodes)) => {
+                    for node_info in nodes.nodes {
+                        let node = NodeInfo::try_from(&node_info)?;
+                        if node.id != self.node.node_info.id {
+                            nodes_to_query.push_back(node);
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+
+        Ok(None)
     }
 
     // Useful for manual demos and health checks even though the automatic
@@ -433,5 +636,21 @@ impl SKademliaClient {
 
         drop(client);
         Ok(())
+    }
+}
+
+fn print_auction(auction: &Auction) {
+    println!(
+        "Auction\nkey: {}\nobject: {}\ninitial_value: {}\ncurrent_price: {}\nseller: {}\nbids: {}",
+        auction.key,
+        auction.object,
+        auction.initial_value,
+        auction.highest_bid_amount(),
+        auction.seller,
+        auction.bids.len()
+    );
+
+    for bid in &auction.bids {
+        println!("bid: buyer={} amount={}", bid.buyer, bid.amount);
     }
 }
