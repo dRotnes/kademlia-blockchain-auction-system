@@ -28,7 +28,6 @@ Implemented:
 Still prototype-level:
 
 - Consensus is represented by block and proof-of-work primitives, but there is no full replicated chain synchronization or fork-choice implementation yet.
-- Proof-of-reputation is not implemented.
 - Auction bidding supports simple highest-bid validation, but there is no close-auction workflow or winner settlement yet.
 - Ledger blocks are local to each node; full block gossip and fork-choice are still future work.
 - The application has a small demo CLI, not a polished end-user CLI or web UI.
@@ -227,7 +226,3 @@ Supported RPCs:
 - `Store`
 - `FindNode`
 - `FindValue`
-
-## Notes For Portfolio Review
-
-This repository is best presented as a security/distributed-systems prototype rather than a production auction platform. The strongest parts are the authenticated gRPC transport, Kademlia routing/storage flow, deterministic keying, persistence, automated auction flow, one-shot demo commands, and testable Rust domain model. The README and `explanation.txt` call out the remaining work honestly so reviewers can see both the implemented system and the engineering judgment around unfinished scope.
