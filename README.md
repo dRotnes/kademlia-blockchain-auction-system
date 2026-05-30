@@ -28,7 +28,6 @@ Implemented:
 Still prototype-level:
 
 - Consensus is represented by block and proof-of-work primitives, but there is no full replicated chain synchronization or fork-choice implementation yet.
-- Proof-of-reputation is not implemented.
 - Auction bidding supports simple highest-bid validation, but there is no close-auction workflow or winner settlement yet.
 - Ledger blocks are local to each node; full block gossip and fork-choice are still future work.
 - The application has a small demo CLI, not a polished end-user CLI or web UI.
