@@ -1,12 +1,10 @@
 use std::sync::{Arc, RwLock};
 
-use ethereum_types::U256;
-
-use crate::{blockchain::address::Address, node::NodeInfo, utils::{calculate_distance, Config}};
+use crate::{blockchain::address::Address, node::NodeInfo, utils::Config};
 
 use super::kbucket::KBucket;
 
-type SyncedTable = Arc<RwLock<Vec<KBucket>>>; 
+type SyncedTable = Arc<RwLock<Vec<KBucket>>>;
 
 #[derive(Debug, Clone)]
 pub struct RoutingTable {
@@ -15,13 +13,12 @@ pub struct RoutingTable {
     pub table: SyncedTable,
 }
 
-impl RoutingTable { 
+impl RoutingTable {
     pub fn new(node_info: NodeInfo, config: Config) -> RoutingTable {
-        
         let rt = RoutingTable {
             id: node_info.id,
             config,
-            table: Arc::new(RwLock::new(vec![KBucket::new(); 255]))
+            table: Arc::new(RwLock::new(vec![KBucket::new(); 255])),
         };
 
         rt
@@ -33,7 +30,7 @@ impl RoutingTable {
     pub fn get_bucket_index(&self, node_id: &Address) -> Option<usize> {
         let distance = self.id.distance(node_id);
         let lz = distance.leading_zeros() as usize;
-    
+
         if lz == 256 {
             // distance == 0, same node
             return None;
@@ -41,7 +38,7 @@ impl RoutingTable {
         if lz == 255 {
             return Some(0);
         }
-    
+
         Some(254 - lz)
     }
 
@@ -49,7 +46,6 @@ impl RoutingTable {
      * Evict a node from the bucket.
      */
     pub fn evict_from_bucket(bucket: &mut KBucket, node_id: &Address) {
-        
         // check if node is in the bucket
         let mut idx = None::<usize>;
         for (i, node_info) in bucket.list.iter().enumerate() {
@@ -61,7 +57,6 @@ impl RoutingTable {
 
         // remove node if it exists in the list
         if let Some(idx) = idx {
-            
             info!("Evicting existing entry");
             // remove contact from list
             let mut split_list = bucket.list.split_off(idx);
@@ -74,29 +69,29 @@ impl RoutingTable {
         if node_info.id == self.id {
             return None;
         }
-    
+
         info!("Inserting new contact: {}", &node_info.id);
-    
+
         let idx = self.get_bucket_index(&node_info.id)?;
-    
+
         let Ok(mut table) = self.table.write() else {
             return None;
         };
 
         let bucket = &mut table[idx];
-    
+
         // evict key from bucket if it exists
         Self::evict_from_bucket(bucket, &node_info.id);
-    
+
         bucket.update_last_refresh_time();
-    
+
         // If the list is full, drop the least recently seen node
         if bucket.len() == self.config.max_kbucket_entries {
             bucket.list.pop_front();
         }
         // Key is not in the list, try to insert
         bucket.list.push_back(node_info);
-    
+
         Some(())
     }
 
@@ -107,17 +102,17 @@ impl RoutingTable {
         if node_id == &self.id {
             return None;
         }
-    
+
         let idx = self.get_bucket_index(node_id)?;
         let table = self.table.read().ok()?;
-    
+
         let bucket = &table[idx];
         for node in &bucket.list {
             if &node.id == node_id {
                 return Some(node.clone());
             }
         }
-    
+
         None
     }
 

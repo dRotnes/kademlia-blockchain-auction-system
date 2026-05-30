@@ -17,8 +17,10 @@ pub struct Block {
     pub transactions: Vec<Transaction>,
 }
 
+// The networking demo does not mine or sync blocks yet, but the block model is
+// kept as the foundation for the ledger work described in the assignment.
+#[allow(dead_code)]
 impl Block {
-    
     pub fn new(
         index: u64,
         nonce: u64,
@@ -40,11 +42,38 @@ impl Block {
 
     // Calculate the hash value of the block
     pub fn calculate_hash(&self) -> U256 {
-        
         let mut hashable_data = self.clone();
         hashable_data.hash = U256::default();
         let serialized = serde_json::to_string(&hashable_data).unwrap();
 
         hash_data(serialized)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blockchain::address::Address;
+    use std::str::FromStr;
+
+    #[test]
+    fn block_hash_changes_when_nonce_changes() {
+        let sender =
+            Address::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap();
+        let recipient =
+            Address::from_str("0000000000000000000000000000000000000000000000000000000000000002")
+                .unwrap();
+        let transaction = Transaction {
+            sender,
+            recipient,
+            amount: 10,
+        };
+
+        let first = Block::new(1, 1, U256::zero(), vec![transaction.clone()]);
+        let second = Block::new(1, 2, U256::zero(), vec![transaction]);
+
+        assert_ne!(first.hash, second.hash);
+        assert_eq!(first.hash, first.calculate_hash());
     }
 }

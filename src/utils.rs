@@ -1,9 +1,9 @@
 mod config;
-pub mod logger;
-pub mod execution;
-pub mod termination;
 pub mod context;
 pub mod crypto_own;
+pub mod execution;
+pub mod logger;
+pub mod termination;
 
 pub use config::Config;
 
@@ -41,13 +41,6 @@ pub fn generate_challenge() -> U256 {
     rng.fill(&mut bytes);
 
     U256::from(&bytes)
-}
-
-/**
- * Calculates the XOR distance metric between two node ids.
- */
-pub fn calculate_distance(id1: U256, id2: U256) -> U256 {
-    id1 ^id2
 }
 
 /**

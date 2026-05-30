@@ -1,2 +1,2 @@
-pub mod routing_table;
 pub mod kbucket;
+pub mod routing_table;

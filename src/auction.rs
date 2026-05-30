@@ -1,9 +1,9 @@
-use std::str::FromStr;
 use anyhow::{anyhow, Result};
+use std::str::FromStr;
 
+use crate::g_rpc::kademlia;
 use crate::utils::format_as_hex_string;
 use crate::{blockchain::address::Address, utils::crypto_own::hash_data};
-use crate::g_rpc::kademlia;
 
 #[derive(Debug, Clone)]
 pub struct Auction {
@@ -14,6 +14,10 @@ pub struct Auction {
     pub bids: Vec<Bid>,
 }
 impl Auction {
+    /// Create a new auction and derive its DHT key from immutable auction data.
+    ///
+    /// The key intentionally excludes bids so the auction can be found by the
+    /// same address as bids are appended.
     pub fn new(object: String, initial_value: u64, seller: &Address) -> Auction {
         let mut auction = Auction {
             key: Address::default(),
@@ -29,7 +33,12 @@ impl Auction {
     }
 
     fn generate_key(&self) -> Address {
-        let data_to_hash = format!("{}{}{}", self.object, self.initial_value, self.seller.to_string());
+        let data_to_hash = format!(
+            "{}{}{}",
+            self.object,
+            self.initial_value,
+            self.seller.to_string()
+        );
         Address::from_str(&format_as_hex_string(hash_data(&data_to_hash))).unwrap()
     }
 }
@@ -37,8 +46,8 @@ impl TryFrom<&kademlia::Auction> for Auction {
     type Error = anyhow::Error;
 
     fn try_from(proto: &kademlia::Auction) -> Result<Self> {
-        let key = Address::from_str(&proto.key)
-            .map_err(|e| anyhow!("Invalid key format: {}", e))?;
+        let key =
+            Address::from_str(&proto.key).map_err(|e| anyhow!("Invalid key format: {}", e))?;
 
         let seller = Address::from_str(&proto.seller)
             .map_err(|e| anyhow!("Invalid seller address: {}", e))?;
@@ -119,9 +128,48 @@ impl Hash for Auction {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Bid {
     pub buyer: Address,
     pub auction: Address,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auction_key_is_stable_for_same_offer() {
+        let seller =
+            Address::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap();
+
+        let first = Auction::new("vintage keyboard".to_string(), 50, &seller);
+        let second = Auction::new("vintage keyboard".to_string(), 50, &seller);
+
+        assert_eq!(first.key, second.key);
+    }
+
+    #[test]
+    fn auction_round_trips_through_protobuf() {
+        let seller =
+            Address::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap();
+        let buyer =
+            Address::from_str("0000000000000000000000000000000000000000000000000000000000000002")
+                .unwrap();
+        let mut auction = Auction::new("signed poster".to_string(), 25, &seller);
+        auction.bids.push(Bid {
+            buyer,
+            auction: auction.key.clone(),
+        });
+
+        let proto: kademlia::Auction = (&auction).into();
+        let decoded = Auction::try_from(&proto).unwrap();
+
+        assert_eq!(auction.key, decoded.key);
+        assert_eq!(auction.object, decoded.object);
+        assert_eq!(auction.initial_value, decoded.initial_value);
+        assert_eq!(auction.bids.len(), decoded.bids.len());
+    }
 }

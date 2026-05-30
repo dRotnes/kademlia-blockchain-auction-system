@@ -1,29 +1,23 @@
 #[macro_use]
 extern crate log;
 
-mod node;
-mod utils;
-mod routing;
-mod g_rpc;
-mod blockchain;
 mod auction;
+mod blockchain;
+mod g_rpc;
+mod node;
+mod routing;
+mod utils;
 
 use std::str::FromStr;
 
 use blockchain::address::Address;
-// External libraries
-use local_ip_address::local_ip;
+use g_rpc::{SKademliaClient, SKademliaServer};
 use node::Node;
-use g_rpc::{SKademliaServer, SKademliaClient};
 use utils::context::Context;
 
 use crate::utils::{
-    format_as_hex_string,
-    termination,
-    logger,
-    execution,
-    Config,
-    crypto_own::{hash_data, setup_keys}
+    crypto_own::{hash_data, setup_keys},
+    execution, format_as_hex_string, logger, termination, Config,
 };
 
 fn main() {
@@ -43,7 +37,7 @@ fn main() {
 
     // Get local IP.
     // let my_local_ip= local_ip().unwrap().to_string();
-    let my_local_ip= String::from("127.0.0.1");
+    let my_local_ip = String::from("127.0.0.1");
 
     // Setup context.
     let context = Context {
@@ -54,5 +48,4 @@ fn main() {
     let server = SKademliaServer::new(&context);
     let client = SKademliaClient::new(&context);
     execution::run_in_parallel(vec![&server, &client])
-
 }

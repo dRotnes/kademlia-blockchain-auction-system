@@ -4,7 +4,6 @@ use crate::node::NodeInfo;
 
 use chrono::Utc;
 
-
 #[derive(Debug, Clone)]
 pub struct KBucket {
     last_refresh_time: i64,
@@ -32,11 +31,4 @@ impl KBucket {
     pub fn len(&self) -> usize {
         self.list.len()
     }
-
-    // /**
-    //  * Last refresh time
-    //  */
-    // pub fn last_refresh_time(&self) -> i64 {
-    //     self.last_refresh_time
-    // }
 }
